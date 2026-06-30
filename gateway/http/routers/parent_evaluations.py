@@ -1,11 +1,12 @@
-"""Router parent — /parent/evaluations/* 
+"""Router parent — /parent/evaluations/*
 Génération et correction de QCM par l'IA depuis les sessions de chat.
 """
 
 import json
+import os
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
@@ -15,7 +16,7 @@ from sqlalchemy.orm import Session
 from accounts.parents.service import ParentService
 from common.exceptions import AuthorizationError
 from data.database import get_db
-from data.models import User, Chat, Support
+from data.models import Chat, Support, User
 from data.models.evaluation import Evaluation
 from gateway.http.dependencies import get_current_user
 
@@ -30,10 +31,13 @@ def _require_parent(u: User) -> User:
 
 # ── Génération QCM par l'IA ───────────────────────────────────────────────────
 
-async def generate_qcm_with_ai(chat_content: str, subject: str, title: str) -> List[Dict]:
+
+async def generate_qcm_with_ai(
+    chat_content: str, subject: str, title: str
+) -> List[Dict]:
     """Génère 10 QCM en 2 étapes pour garantir la qualité."""
 
-    ollama_url = "http://localhost:11434"
+    ollama_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
     # ── ÉTAPE 1 : Extraire les faits clés de la conversation ──────────────────
     prompt_extract = f"""Lis cette conversation entre un élève et un tuteur IA sur le sujet: {subject} / {title}
@@ -50,8 +54,12 @@ Ne mets que les faits, pas de commentaires."""
         async with httpx.AsyncClient(timeout=120.0) as client:
             r = await client.post(
                 f"{ollama_url}/api/generate",
-                json={"model": "gemma3:4b", "prompt": prompt_extract, "stream": False,
-                      "options": {"temperature": 0.2, "num_predict": 800}}
+                json={
+                    "model": "gemma3:4b",
+                    "prompt": prompt_extract,
+                    "stream": False,
+                    "options": {"temperature": 0.2, "num_predict": 800},
+                },
             )
             r.raise_for_status()
             facts_text = r.json().get("response", "")
@@ -68,7 +76,10 @@ Ne mets que les faits, pas de commentaires."""
 
     if not facts:
         # Utiliser directement le contenu de la conversation comme base
-        facts = [chat_content[i:i+200] for i in range(0, min(len(chat_content), 2000), 200)]
+        facts = [
+            chat_content[i : i + 200]
+            for i in range(0, min(len(chat_content), 2000), 200)
+        ]
 
     # ── ÉTAPE 2 : Générer un QCM par fait ─────────────────────────────────────
     questions = []
@@ -86,8 +97,12 @@ Réponds UNIQUEMENT avec ce format JSON exact, une seule ligne:
             async with httpx.AsyncClient(timeout=60.0) as client:
                 r = await client.post(
                     f"{ollama_url}/api/generate",
-                    json={"model": "gemma3:4b", "prompt": prompt_qcm, "stream": False,
-                          "options": {"temperature": 0.3, "num_predict": 300}}
+                    json={
+                        "model": "gemma3:4b",
+                        "prompt": prompt_qcm,
+                        "stream": False,
+                        "options": {"temperature": 0.3, "num_predict": 300},
+                    },
                 )
                 r.raise_for_status()
                 raw = r.json().get("response", "").strip()
@@ -109,35 +124,58 @@ Réponds UNIQUEMENT avec ce format JSON exact, une seule ligne:
                     if correct not in ("A", "B", "C", "D"):
                         correct = "A"
 
-                    questions.append({
-                        "id": len(questions) + 1,
-                        "question": str(q_data.get("question", f"Question sur {fact[:50]}")),
-                        "choices": choices,
-                        "correct": correct,
-                        "explanation": str(q_data.get("explanation", fact[:100])),
-                    })
+                    questions.append(
+                        {
+                            "id": len(questions) + 1,
+                            "question": str(
+                                q_data.get("question", f"Question sur {fact[:50]}")
+                            ),
+                            "choices": choices,
+                            "correct": correct,
+                            "explanation": str(q_data.get("explanation", fact[:100])),
+                        }
+                    )
         except Exception as e:
             print(f"[QCM Q{i+1}] Erreur: {e}")
             # Question de secours basée sur le fait
-            questions.append({
-                "id": len(questions) + 1,
-                "question": f"Concernant {subject}: {fact[:80]}..., quelle affirmation est correcte ?",
-                "choices": {"A": fact[:60], "B": "Aucune des réponses", "C": "Toutes les réponses", "D": "Cela dépend du contexte"},
-                "correct": "A",
-                "explanation": fact[:150],
-            })
+            questions.append(
+                {
+                    "id": len(questions) + 1,
+                    "question": f"Concernant {subject}: {fact[:80]}..., quelle affirmation est correcte ?",
+                    "choices": {
+                        "A": fact[:60],
+                        "B": "Aucune des réponses",
+                        "C": "Toutes les réponses",
+                        "D": "Cela dépend du contexte",
+                    },
+                    "correct": "A",
+                    "explanation": fact[:150],
+                }
+            )
 
     print(f"[QCM] Total: {len(questions)} questions générées")
-    return questions[:10] if questions else [{
-        "id": 1,
-        "question": f"Quel est le sujet principal de cette session ?",
-        "choices": {"A": title, "B": "Mathématiques", "C": "Histoire", "D": "Géographie"},
-        "correct": "A",
-        "explanation": f"Cette session portait sur: {title}"
-    }]
+    return (
+        questions[:10]
+        if questions
+        else [
+            {
+                "id": 1,
+                "question": "Quel est le sujet principal de cette session ?",
+                "choices": {
+                    "A": title,
+                    "B": "Mathématiques",
+                    "C": "Histoire",
+                    "D": "Géographie",
+                },
+                "correct": "A",
+                "explanation": f"Cette session portait sur: {title}",
+            }
+        ]
+    )
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
+
 
 class GenerateEvalRequest(BaseModel):
     chat_id: str
@@ -192,20 +230,27 @@ async def generate_evaluation(
         role = m.get("role", "")
         content = m.get("content", "")
         if isinstance(content, list):
-            content = " ".join(c.get("text", "") for c in content if isinstance(c, dict))
+            content = " ".join(
+                c.get("text", "") for c in content if isinstance(c, dict)
+            )
         if role == "user":
             conversation_text += f"Élève: {content}\n"
         elif role == "assistant":
             conversation_text += f"Tuteur: {content}\n"
 
     if len(conversation_text) < 50:
-        raise HTTPException(status_code=400, detail="La session est trop courte pour générer une évaluation.")
+        raise HTTPException(
+            status_code=400,
+            detail="La session est trop courte pour générer une évaluation.",
+        )
 
     # Générer les QCM avec l'IA
     questions = await generate_qcm_with_ai(conversation_text, subject, title)
 
     if not questions:
-        raise HTTPException(status_code=500, detail="L'IA n'a pas pu générer les questions.")
+        raise HTTPException(
+            status_code=500, detail="L'IA n'a pas pu générer les questions."
+        )
 
     # Sauvegarder en BDD
     evaluation = Evaluation(
@@ -239,9 +284,12 @@ async def list_evaluations(
     except AuthorizationError as e:
         raise HTTPException(status_code=403, detail=str(e))
 
-    evals = db.query(Evaluation).filter(
-        Evaluation.student_id == student_id
-    ).order_by(Evaluation.created_at.desc()).all()
+    evals = (
+        db.query(Evaluation)
+        .filter(Evaluation.student_id == student_id)
+        .order_by(Evaluation.created_at.desc())
+        .all()
+    )
 
     return [e.to_dict() for e in evals]
 
@@ -294,11 +342,13 @@ async def submit_answers(
         is_correct = student_answer.upper() == q["correct"].upper()
         if is_correct:
             correct_count += 1
-        results.append({
-            **q,
-            "student_answer": student_answer,
-            "is_correct": is_correct,
-        })
+        results.append(
+            {
+                **q,
+                "student_answer": student_answer,
+                "is_correct": is_correct,
+            }
+        )
 
     nb_total = len(ev.questions)
     score = round((correct_count / max(nb_total, 1)) * 100, 1)
@@ -316,5 +366,5 @@ async def submit_answers(
     return {
         **ev.to_dict(),
         "results": results,
-        "message": f"🎉 {correct_count}/{nb_total} correctes — Score : {score}/100"
+        "message": f"🎉 {correct_count}/{nb_total} correctes — Score : {score}/100",
     }

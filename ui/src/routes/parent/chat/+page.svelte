@@ -42,7 +42,10 @@
 	onMount(() => {
 		if (!browser) return;
 		const token = localStorage.getItem('token');
-		if (!token) { goto('/auth'); return; }
+		if (!token) {
+			goto('/auth');
+			return;
+		}
 
 		// Attendre que Chat.svelte initialise openTutorEvents
 		const waitForEvents = setInterval(() => {
@@ -71,7 +74,9 @@
 </script>
 
 <div class="flex h-screen overflow-hidden bg-white dark:bg-gray-900 p-2">
-	<div class="flex-1 h-full overflow-hidden bg-[#F5F7F9] dark:bg-gray-900 rounded-2xl shadow-sm mr-2">
+	<div
+		class="flex-1 h-full overflow-hidden bg-[#F5F7F9] dark:bg-gray-900 rounded-2xl shadow-sm mr-2"
+	>
 		<Chat on:chatEvent={handleChatEvent} />
 	</div>
 	{#if !$isFullscreenAvatar}
