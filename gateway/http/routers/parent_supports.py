@@ -7,18 +7,27 @@ pour l'un de ses enfants liés, en s'appuyant sur les services existants.
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
-from fastapi.responses import JSONResponse
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+    status,
+)
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
+from accounts.parents.service import ParentService
 from common.exceptions import AuthorizationError, NotFoundError, ValidationError
 from config import settings
+from data.database import get_db
 from data.models import User
 from gateway.http.dependencies import get_current_user, get_supports_service
-from data.database import get_db
 from learning.supports.service import SupportsService
-from accounts.parents.service import ParentService
-from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/parent/supports", tags=["parent-supports"])
 
@@ -58,7 +67,7 @@ class SupportFileInfo(BaseModel):
 
 class ParentSupportResponse(BaseModel):
     id: str
-    user_id: str          # = student_id (le soutien appartient à l'enfant)
+    user_id: str  # = student_id (le soutien appartient à l'enfant)
     title: str
     short_description: Optional[str] = None
     subject: Optional[str] = None
@@ -114,19 +123,13 @@ async def create_support_for_child(
     """
     _require_parent(current_user)
 
-    parent_svc = ParentService(db)
     payload = data.model_dump(exclude={"student_id", "parent_message"})
 
     try:
-        support = parent_svc.create_support_for_student(
-            parent_id=current_user.id,
-            student_id=data.student_id,
-            data=payload,
-        )
-    except AuthorizationError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
-    except NotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=exc.message)
+        # SÉCURITÉ : soutien créé pour le parent lui-même — sans lien enfant requis
+        support = svc.create(user_id=current_user.id, data=payload)
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
     return ParentSupportResponse(
         id=support.id,
@@ -186,7 +189,7 @@ async def upload_file_for_child_support(
 
     try:
         record = svc.upload_file(
-            user_id=student_id,          # le fichier appartient à l'enfant
+            user_id=student_id,  # le fichier appartient à l'enfant
             support_id=support_id,
             filename=file.filename or "",
             content_type=file.content_type,
@@ -257,6 +260,7 @@ async def get_child_support_detail(
 
     # Récupérer le soutien
     from data.models import Support
+
     support = db.query(Support).filter(Support.id == support_id).first()
     if not support:
         raise HTTPException(status_code=404, detail="Soutien introuvable")
@@ -270,6 +274,7 @@ async def get_child_support_detail(
 
     # Récupérer les fichiers
     from data.models import SupportFile
+
     files = db.query(SupportFile).filter(SupportFile.support_id == support_id).all()
 
     return {
@@ -307,6 +312,7 @@ async def link_chat_to_support(
     _require_parent(current_user)
 
     from data.models import Support
+
     support = db.query(Support).filter(Support.id == support_id).first()
     if not support:
         raise HTTPException(status_code=404, detail="Soutien introuvable")
@@ -332,6 +338,7 @@ async def mark_support_completed(
     """Marque un soutien comme terminé."""
     _require_parent(current_user)
     from data.models import Support
+
     support = db.query(Support).filter(Support.id == support_id).first()
     if not support:
         raise HTTPException(status_code=404, detail="Soutien introuvable")
@@ -341,6 +348,7 @@ async def mark_support_completed(
     except AuthorizationError as exc:
         raise HTTPException(status_code=403, detail=str(exc))
     from datetime import datetime
+
     support.status = "completed"
     support.updated_at = datetime.utcnow()
     db.commit()
@@ -356,34 +364,47 @@ async def find_student_by_email(
     """Cherche un étudiant par email pour simplifier la liaison parent-enfant."""
     _require_parent(current_user)
     from data.models import User as UserModel
+
     # Recherche insensible à la casse + accepter role user ET parent (enfant peut avoir rôle user)
-    student = db.query(UserModel).filter(
-        UserModel.email.ilike(email.strip()),
-        UserModel.role.in_(["user", "student"])
-    ).first()
+    student = (
+        db.query(UserModel)
+        .filter(
+            UserModel.email.ilike(email.strip()),
+            UserModel.role.in_(["user", "student"]),
+        )
+        .first()
+    )
     # Si pas trouvé avec role user/student, chercher juste par email
     if not student:
-        student = db.query(UserModel).filter(
-            UserModel.email.ilike(email.strip())
-        ).first()
+        student = (
+            db.query(UserModel).filter(UserModel.email.ilike(email.strip())).first()
+        )
         # Exclure les admins et parents
         if student and student.role in ("admin", "parent"):
             student = None
     if not student:
-        raise HTTPException(status_code=404, detail="Aucun élève trouvé avec cet email.")
+        raise HTTPException(
+            status_code=404, detail="Aucun élève trouvé avec cet email."
+        )
     # Créer automatiquement le lien parent-étudiant si pas encore fait
-    from accounts.parents.models import ParentStudentLink
     import uuid as uuid_lib
-    existing = db.query(ParentStudentLink).filter(
-        ParentStudentLink.parent_id == current_user.id,
-        ParentStudentLink.student_id == student.id
-    ).first()
+
+    from accounts.parents.models import ParentStudentLink
+
+    existing = (
+        db.query(ParentStudentLink)
+        .filter(
+            ParentStudentLink.parent_id == current_user.id,
+            ParentStudentLink.student_id == student.id,
+        )
+        .first()
+    )
     if not existing:
         link = ParentStudentLink(
             id=str(uuid_lib.uuid4()),
             parent_id=current_user.id,
             student_id=student.id,
-            status="active"
+            status="active",
         )
         db.add(link)
         db.commit()
