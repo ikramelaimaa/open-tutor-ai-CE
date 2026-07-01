@@ -128,3 +128,10 @@ export const linkChatToSupport = (token: string, supportId: string, chatId: stri
 		token,
 		{ method: 'PATCH', body: '{}' }
 	);
+
+// ✅ FIX BUG DASHBOARD : liste les soutiens du parent connecté (pas par student_id)
+export const listParentSupports = (token: string) =>
+        apiFetch<ParentSupportResponse[]>(
+                `${TUTOR_API_BASE_URL}/parent/supports/list-mine`,
+                token
+        );

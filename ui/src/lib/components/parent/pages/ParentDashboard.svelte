@@ -3,7 +3,7 @@
 	import { browser } from '$app/environment';
 	import { goto } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
-	import { listChildSupports } from '$lib/apis/parent';
+	import { listParentSupports } from '$lib/apis/parent';
 
 	let supports: any[] = [];
 	let loading = true;
@@ -30,7 +30,7 @@
 		studentId = localStorage.getItem('parent_student_id') ?? '';
 		studentName = localStorage.getItem('parent_student_name') ?? '';
 		try {
-			supports = await listChildSupports(token, studentId);
+			supports = await listParentSupports(token);
 		} catch (e: any) {
 			toast.error(e.message ?? 'Erreur lors du chargement');
 		} finally {

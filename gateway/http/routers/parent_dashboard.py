@@ -36,7 +36,7 @@ async def get_dashboard(
         raise HTTPException(status_code=403, detail=str(e))
 
     # Récupérer les soutiens de l'étudiant
-    supports = db.query(Support).filter(Support.user_id == student_id).all()
+    supports = db.query(Support).filter(Support.user_id == current_user.id).all()
     total_supports = len(supports)
     completed = len([s for s in supports if s.status == "completed"])
 

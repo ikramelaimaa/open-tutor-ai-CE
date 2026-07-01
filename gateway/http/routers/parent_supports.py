@@ -221,7 +221,7 @@ async def list_child_supports(
     except AuthorizationError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
 
-    supports = svc.list_for_user(student_id)
+    supports = svc.list_for_user(current_user.id)
     return [
         ParentSupportResponse(
             id=s.id,
@@ -409,3 +409,73 @@ async def find_student_by_email(
         db.add(link)
         db.commit()
     return {"id": student.id, "name": student.name, "email": student.email}
+
+
+@router.get("/list-mine", response_model=List[ParentSupportResponse])
+async def list_my_supports(
+    current_user: User = Depends(get_current_user),
+    svc: SupportsService = Depends(get_supports_service),
+    db: Session = Depends(get_db),
+):
+    """✅ CORRIGÉ : Liste les soutiens créés par le parent connecté (user_id = parent.id)."""
+    _require_parent(current_user)
+    supports = svc.list_for_user(current_user.id)
+    return [
+        ParentSupportResponse(
+            id=s.id,
+            user_id=s.user_id,
+            title=s.title,
+            short_description=s.short_description,
+            subject=s.subject,
+            custom_subject=s.custom_subject,
+            learning_objective=s.learning_objective,
+            learning_type=s.learning_type,
+            level=s.level,
+            content_language=s.content_language,
+            estimated_duration=s.estimated_duration,
+            keywords=s.keywords.split(",") if s.keywords else None,
+            start_date=s.start_date,
+            end_date=s.end_date,
+            status=s.status,
+            chat_id=s.chat_id,
+            files=[],
+            created_at=s.created_at,
+            updated_at=s.updated_at,
+        )
+        for s in supports
+    ]
+
+
+@router.get("/list-mine", response_model=List[ParentSupportResponse])
+async def list_my_supports(
+    current_user: User = Depends(get_current_user),
+    svc: SupportsService = Depends(get_supports_service),
+    db: Session = Depends(get_db),
+):
+    """✅ FIX : soutiens du parent connecté (user_id = parent.id)."""
+    _require_parent(current_user)
+    supports = svc.list_for_user(current_user.id)
+    return [
+        ParentSupportResponse(
+            id=s.id,
+            user_id=s.user_id,
+            title=s.title,
+            short_description=s.short_description,
+            subject=s.subject,
+            custom_subject=s.custom_subject,
+            learning_objective=s.learning_objective,
+            learning_type=s.learning_type,
+            level=s.level,
+            content_language=s.content_language,
+            estimated_duration=s.estimated_duration,
+            keywords=s.keywords.split(",") if s.keywords else None,
+            start_date=s.start_date,
+            end_date=s.end_date,
+            status=s.status,
+            chat_id=s.chat_id,
+            files=[],
+            created_at=s.created_at,
+            updated_at=s.updated_at,
+        )
+        for s in supports
+    ]
