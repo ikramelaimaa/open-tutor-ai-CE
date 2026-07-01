@@ -559,3 +559,51 @@ async def get_linked_students(
             )
 
     return {"students": students, "total": len(students)}
+
+
+# ── Settings parent ───────────────────────────────────────────────────────────
+
+@router.patch("/settings/profile")
+async def update_profile(
+    data: dict,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Met à jour le nom du parent."""
+    _require_parent(current_user)
+    # SÉCURITÉ : seul le parent connecté peut modifier son propre profil
+    name = str(data.get("name", "")).strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Le nom ne peut pas être vide")
+    if len(name) > 100:
+        raise HTTPException(status_code=400, detail="Nom trop long (max 100 chars)")
+    current_user.name = name
+    current_user.updated_at = datetime.utcnow()
+    db.commit()
+    return {"id": current_user.id, "name": current_user.name, "email": current_user.email}
+
+
+@router.patch("/settings/password")
+async def update_password(
+    data: dict,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Change le mot de passe du parent."""
+    _require_parent(current_user)
+    from passlib.context import CryptContext
+    pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+    current_password = str(data.get("current_password", ""))
+    new_password = str(data.get("new_password", ""))
+
+    # SÉCURITÉ : vérifier l'ancien mot de passe avant de changer
+    if not pwd_context.verify(current_password, current_user.password_hash):
+        raise HTTPException(status_code=400, detail="Mot de passe actuel incorrect")
+    if len(new_password) < 8:
+        raise HTTPException(status_code=400, detail="Mot de passe trop court (min 8 chars)")
+
+    current_user.password_hash = pwd_context.hash(new_password)
+    current_user.updated_at = datetime.utcnow()
+    db.commit()
+    return {"message": "Mot de passe mis à jour avec succès"}
